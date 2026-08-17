@@ -39,6 +39,22 @@ local function jump_or_list(lines, title)
   vim.cmd('copen')
 end
 
+-- true if the identifier under the cursor is immediately followed by '(',
+-- i.e. this is a call/method-declaration site rather than a variable read.
+local function cursor_word_is_call(word)
+  local line = vim.fn.getline('.')
+  local curcol = vim.fn.col('.')
+  local pos = 1
+  while true do
+    local s, e = line:find('[%a_$][%w_$]*', pos)
+    if not s then return false end
+    if curcol >= s and curcol <= e then
+      return line:sub(e + 1):match('^%s*%(') ~= nil
+    end
+    pos = e + 1
+  end
+end
+
 function M.goto_definition()
   local word = vim.fn.expand('<cword>')
   if word == '' then return end
@@ -61,7 +77,24 @@ function M.goto_definition()
     end
   end
 
-  -- fallback: grep for a type or method declaration by name
+  if not cursor_word_is_call(word) then
+    -- variable/parameter/field read: try Neovim's own scoped declaration
+    -- search first (same logic native 'gd' uses), it's exact for locals.
+    if vim.fn.searchdecl(word, 0, 0) == 0 then
+      return
+    end
+    -- not declared in this file's visible scope (e.g. inherited field):
+    -- grep for a field/parameter declaration by name.
+    local field_pattern = string.format(
+      '\\b(private|protected|public|static|final|volatile|transient)*\\s*[A-Za-z_$][\\w$<>\\[\\],. ]*\\s+%s\\s*[;=,)]',
+      word
+    )
+    local lines = vim.fn.systemlist({ 'rg', '--type', 'java', '--vimgrep', '--pcre2', '-e', field_pattern, root })
+    jump_or_list(lines, 'gd: ' .. word)
+    return
+  end
+
+  -- call site: grep for a type or method declaration by name
   local pattern = string.format(
     [[\b(class|interface|enum|record|@interface)\s+%s\b|\b(void|[A-Za-z_$][\w$<>\[\],. ]*)\s+%s\s*\(]],
     word, word
