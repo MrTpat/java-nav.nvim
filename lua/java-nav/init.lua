@@ -22,6 +22,14 @@ local function qf_from_vimgrep(lines, title)
   vim.fn.setqflist({}, ' ', { title = title, lines = lines, efm = '%f:%l:%c:%m' })
 end
 
+-- after opening a file resolved purely by Java's filename convention, land
+-- on the actual type declaration line instead of leaving the cursor at line 1.
+local function place_on_type_decl(word)
+  local escaped = vim.fn.escape(word, '\\/.*$^~[]')
+  local pattern = '\\v<(class|interface|enum|record|\\@interface)\\s+' .. escaped .. '>'
+  vim.fn.search(pattern, 'cW')
+end
+
 local function jump_or_list(lines, title)
   if #lines == 0 then
     vim.notify(title .. ': no matches', vim.log.levels.WARN)
@@ -66,6 +74,7 @@ function M.goto_definition()
     local files = vim.fn.systemlist({ 'rg', '--files', '-g', word .. '.java', root })
     if #files == 1 then
       vim.cmd('edit ' .. vim.fn.fnameescape(files[1]))
+      place_on_type_decl(word)
       return
     elseif #files > 1 then
       vim.fn.setqflist({}, ' ', {
